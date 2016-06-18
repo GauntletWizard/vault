@@ -1,9 +1,13 @@
 package command
 
 import (
+  "bytes"
 	"fmt"
+  "encoding/hex"
 	"os"
 	"strings"
+
+  "golang.org/x/crypto/openpgp/armor"
 
 	"github.com/fatih/structs"
 	"github.com/hashicorp/vault/api"
@@ -160,7 +164,22 @@ func (c *RekeyCommand) Run(args []string) int {
 	// Provide the keys
 	for i, key := range result.Keys {
 		if len(result.PGPFingerprints) > 0 {
-			c.Ui.Output(fmt.Sprintf("Key %d fingerprint: %s; value: %s", i+1, result.PGPFingerprints[i], key))
+			keybytes, err := hex.DecodeString(key)
+			if err != nil {
+				c.Ui.Error(fmt.Sprintf("Error decoding keystring: %s", err))
+			}
+			keybuf := bytes.NewBuffer(nil)
+			ct, err := armor.Encode(keybuf, "PGP MESSAGE", nil)
+			if err == nil {
+				_, err = ct.Write(keybytes)
+			}
+			if err == nil {
+				err = ct.Close()
+			}
+			if err != nil {
+				c.Ui.Error(fmt.Sprintf("Error encoding pgp message: %s", err))
+			}
+			c.Ui.Output(fmt.Sprintf("Key %d fingerprint: %s :\n%s", i+1, result.PGPFingerprints[i], keybuf.String()))
 		} else {
 			c.Ui.Output(fmt.Sprintf("Key %d: %s", i+1, key))
 		}

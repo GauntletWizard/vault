@@ -8,12 +8,14 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/vault/helper/pgpkeys"
 	"github.com/hashicorp/vault/vault"
 
 	"golang.org/x/crypto/openpgp"
+	"golang.org/x/crypto/openpgp/armor"
 	"golang.org/x/crypto/openpgp/packet"
 )
 
@@ -89,7 +91,7 @@ func parseDecryptAndTestUnsealKeys(t *testing.T,
 
 	var re *regexp.Regexp
 	if fingerprints {
-		re, err = regexp.Compile("\\s*Key\\s+\\d+\\s+fingerprint:\\s+([0-9a-fA-F]+);\\s+value:\\s+(.*)")
+		re, err = regexp.Compile("(?ms)\\s*Key\\s+\\d+\\s+fingerprint:\\s+([0-9a-fA-F]+)\\s+:\n(-----BEGIN PGP MESSAGE-----\n.*?\n-----END PGP MESSAGE-----)")
 	} else {
 		re, err = regexp.Compile("\\s*Key\\s+\\d+:\\s+(.*)")
 	}
@@ -109,7 +111,11 @@ func parseDecryptAndTestUnsealKeys(t *testing.T,
 				t.Fatalf("Key not found: %#v", tuple)
 			}
 			matchedFingerprints = append(matchedFingerprints, tuple[1])
-			encodedKeys = append(encodedKeys, tuple[2])
+      armortext = bytes.NewBuffer(tuple[2])
+      block, err := armor.Decode(armortext)
+      keyBuf :=  bytes.NewBuffer(nil)
+      _, err = block.Body.Read(keyBuf)
+			encodedKeys = append(encodedKeys, hex.EncodeToString(keyBuf.Bytes()))
 		} else {
 			if len(tuple) != 2 {
 				t.Fatalf("Key not found: %#v", tuple)
@@ -140,10 +146,12 @@ func parseDecryptAndTestUnsealKeys(t *testing.T,
 		if err != nil {
 			t.Fatalf("Error parsing private key %d: %s", i, err)
 		}
-		keyBytes, err := hex.DecodeString(encodedKeys[i])
+		block, err := armor.Decode(strings.NewReader(encodedKeys[i]))
 		if err != nil {
-			t.Fatalf("Error hex-decoding key %d: %s", i, err)
+			t.Fatalf("Error pgp-decoding key %d: %s", i, err)
 		}
+		var keyBytes []byte
+		block.Body.Read(keyBytes)
 		entityList := &openpgp.EntityList{entity}
 		md, err := openpgp.ReadMessage(bytes.NewBuffer(keyBytes), entityList, nil, nil)
 		if err != nil {
